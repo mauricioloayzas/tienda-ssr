@@ -1,0 +1,130 @@
+service: clichin-tienda-ssr
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  memorySize: 512
+  timeout: 15
+  versionFunctions: false
+  environment:
+    NUXT_PUBLIC_API_AUTH_BASE: ${self:custom.apiAuthBase.${sls:stage}}
+    NUXT_PUBLIC_API_APOTHECA_BASE: ${self:custom.apiApothecaBase.${sls:stage}}
+    NUXT_PUBLIC_API_COLLECTOR_BASE: ${self:custom.apiCollectorBase.${sls:stage}}
+    NUXT_PUBLIC_RECAPTCHA_SITE_KEY: ${env:RECAPTCHA_SITE_KEY, ''}
+    NUXT_PUBLIC_SITE_URL: ${self:custom.siteUrl.${sls:stage}}
+    # NUXT_APP_CDN_URL es build-time (se pasa al correr `npm run build`, no al runtime del Lambda)
+
+custom:
+  # Mismas API Gateways que ya usa caja-registradora/frontend y booking-ssr — estos
+  # endpoints públicos nuevos (/public/...) viven en los backends existentes.
+  apiAuthBase:
+    dev: https://0dpp2nb3rd.execute-api.us-east-1.amazonaws.com
+    prod: https://qbjvrgskk7.execute-api.us-east-1.amazonaws.com
+  apiApothecaBase:
+    dev: https://spngyrrbc4.execute-api.us-east-1.amazonaws.com
+    prod: https://meuguwhm6j.execute-api.us-east-1.amazonaws.com
+  apiCollectorBase:
+    dev: https://sja0cciay0.execute-api.us-east-1.amazonaws.com
+    prod: https://6rds6jb9ok.execute-api.us-east-1.amazonaws.com
+  siteUrl:
+    dev: https://dev.tienda.clichin.app
+    prod: https://tienda.clichin.app
+
+  # Orígenes permitidos para que el navegador cargue los assets (_nuxt/*.js) del bucket S3.
+  corsOrigins:
+    dev:
+      - https://dev.tienda.clichin.app
+    prod:
+      - https://tienda.clichin.app
+
+  # Bucket S3 donde se sincronizan los assets del build (.output/public/) después de cada deploy
+  assetsBucket:
+    dev: clichin-tienda-assets-dev
+    prod: clichin-tienda-assets-prod
+
+functions:
+  nuxt:
+    handler: .output/server/index.handler
+    events:
+      - httpApi:
+          path: /
+          method: ANY
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+
+plugins:
+  - serverless-offline
+
+package:
+  patterns:
+    - '!**'
+    - '.output/server/**'
+
+resources:
+  Conditions:
+    # tienda.clichin.app solo se conecta en prod (certificado ACM ya validado); dev sigue
+    # usando únicamente la URL cruda de execute-api.
+    IsProd: !Equals ['${sls:stage}', 'prod']
+
+  Resources:
+    TiendaDomainName:
+      Type: AWS::ApiGatewayV2::DomainName
+      Condition: IsProd
+      Properties:
+        DomainName: tienda.clichin.app
+        DomainNameConfigurations:
+          - CertificateArn: arn:aws:acm:us-east-1:996197173188:certificate/08e464da-3f3a-4b7c-916c-78d991441d6c
+            EndpointType: REGIONAL
+
+    TiendaApiMapping:
+      Type: AWS::ApiGatewayV2::ApiMapping
+      Condition: IsProd
+      Properties:
+        ApiId: !Ref HttpApi
+        DomainName: !Ref TiendaDomainName
+        Stage: !Ref HttpApiStage
+
+    TiendaAssetsBucket:
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        BucketName: ${self:custom.assetsBucket.${sls:stage}}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
+        OwnershipControls:
+          Rules:
+            - ObjectOwnership: BucketOwnerPreferred
+        WebsiteConfiguration:
+          IndexDocument: index.html
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins: ${self:custom.corsOrigins.${sls:stage}}
+              AllowedMethods: [GET, HEAD]
+              AllowedHeaders: ['*']
+              MaxAge: 3000
+    TiendaAssetsBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref TiendaAssetsBucket
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal: '*'
+              Action: 's3:GetObject'
+              Resource: !Sub '${TiendaAssetsBucket.Arn}/*'
+
+  Outputs:
+    TiendaRegionalDomainName:
+      Condition: IsProd
+      Value: !GetAtt TiendaDomainName.RegionalDomainName
+    TiendaRegionalHostedZoneId:
+      Condition: IsProd
+      Value: !GetAtt TiendaDomainName.RegionalHostedZoneId
