@@ -18,6 +18,11 @@ export interface PublicProducto {
   unit: string
   sale_price: number
   stock: number
+  image_principal: string | null
+  image_2: string | null
+  image_3: string | null
+  image_4: string | null
+  video_url: string | null
 }
 
 export const TIPOS_IDENTIFICACION = [

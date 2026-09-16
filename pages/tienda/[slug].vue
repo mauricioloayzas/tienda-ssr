@@ -88,6 +88,36 @@ function quitarDelCarrito(productoId: string) {
   carrito[productoId] = 0
 }
 
+// --- Detalle / galería ---
+const detalleProducto = ref<PublicProducto | null>(null)
+const galeriaIndex = ref(0)
+
+interface MediaItem { tipo: 'imagen' | 'video', url: string }
+const galeriaMedia = computed<MediaItem[]>(() => {
+  if (!detalleProducto.value) return []
+  const p = detalleProducto.value
+  const items: MediaItem[] = []
+  for (const url of [p.image_principal, p.image_2, p.image_3, p.image_4]) {
+    if (url) items.push({ tipo: 'imagen', url })
+  }
+  if (p.video_url) items.push({ tipo: 'video', url: p.video_url })
+  return items
+})
+
+function abrirDetalle(p: PublicProducto) {
+  detalleProducto.value = p
+  galeriaIndex.value = 0
+}
+function cerrarDetalle() {
+  detalleProducto.value = null
+}
+function mediaSiguiente() {
+  galeriaIndex.value = (galeriaIndex.value + 1) % galeriaMedia.value.length
+}
+function mediaAnterior() {
+  galeriaIndex.value = (galeriaIndex.value - 1 + galeriaMedia.value.length) % galeriaMedia.value.length
+}
+
 // --- Contacto ---
 const nombreContacto = ref('')
 const telefonoContacto = ref('')
@@ -301,10 +331,15 @@ function volver() {
       </div>
       <div v-else class="product-grid" style="margin-top:16px;">
         <div v-for="p in productos" :key="p.id" class="product-card">
+          <button type="button" class="product-image-btn" @click="abrirDetalle(p)">
+            <img v-if="p.image_principal" :src="p.image_principal" :alt="p.name" class="product-image">
+            <span v-else class="product-image placeholder">📦</span>
+          </button>
           <span class="name">{{ p.name }}</span>
           <span v-if="p.description" class="desc">{{ p.description }}</span>
           <span class="price">${{ p.sale_price.toFixed(2) }}</span>
           <span class="stock">{{ p.stock }} disponibles</span>
+          <button class="btn-link" type="button" @click="abrirDetalle(p)">Ver detalle</button>
           <button
             class="btn btn-primary"
             type="button"
@@ -468,6 +503,44 @@ function volver() {
       <h2>¡Listo!</h2>
       <p v-if="successMensaje">{{ successMensaje }}</p>
       <p v-else-if="volviendoDePayphone">Tu pago fue procesado. {{ profile!.name }} preparará tu pedido.</p>
+    </div>
+
+    <!-- Galería de detalle -->
+    <div v-if="detalleProducto" class="gallery-overlay" @click.self="cerrarDetalle">
+      <div class="gallery-modal">
+        <button type="button" class="gallery-close" @click="cerrarDetalle">✕</button>
+        <div class="gallery-media">
+          <button v-if="galeriaMedia.length > 1" type="button" class="gallery-nav prev" @click="mediaAnterior">‹</button>
+          <template v-if="galeriaMedia.length">
+            <img
+              v-if="galeriaMedia[galeriaIndex]!.tipo === 'imagen'"
+              :src="galeriaMedia[galeriaIndex]!.url"
+              :alt="detalleProducto.name"
+              class="gallery-img"
+            >
+            <video v-else :src="galeriaMedia[galeriaIndex]!.url" controls class="gallery-img" />
+          </template>
+          <div v-else class="product-image placeholder" style="width:100%; height:280px;">📦</div>
+          <button v-if="galeriaMedia.length > 1" type="button" class="gallery-nav next" @click="mediaSiguiente">›</button>
+        </div>
+        <div v-if="galeriaMedia.length > 1" class="gallery-dots">
+          <span v-for="(m, i) in galeriaMedia" :key="i" class="gallery-dot" :class="{ active: i === galeriaIndex }" @click="galeriaIndex = i" />
+        </div>
+        <div class="gallery-info">
+          <h2>{{ detalleProducto.name }}</h2>
+          <p v-if="detalleProducto.description">{{ detalleProducto.description }}</p>
+          <p class="price" style="font-size:20px; color:var(--gray-900); margin-top:8px;">${{ detalleProducto.sale_price.toFixed(2) }}</p>
+          <button
+            class="btn btn-primary"
+            style="margin-top:12px;"
+            type="button"
+            :disabled="cantidadEnCarrito(detalleProducto.id) >= detalleProducto.stock"
+            @click="agregarAlCarrito(detalleProducto)"
+          >
+            {{ cantidadEnCarrito(detalleProducto.id) > 0 ? `En el carrito (${cantidadEnCarrito(detalleProducto.id)})` : 'Agregar al carrito' }}
+          </button>
+        </div>
+      </div>
     </div>
   </main>
 </template>
