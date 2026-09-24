@@ -182,6 +182,19 @@ const gatewayLabels: Record<string, string> = {
   effective: 'Efectivo contra entrega',
 }
 
+// Un negocio puede tener más de una cuenta bancaria — todas caían acá con la misma
+// etiqueta genérica ("Transferencia bancaria"), indistinguibles entre sí antes de elegir.
+// Usa el alias que le puso el negocio, o si no tiene, el banco + los últimos 4 dígitos.
+function paymentOptionLabel(pm: PublicPaymentMethod): string {
+  if (pm.gateway_type === 'bank' && pm.configuration_data) {
+    const { alias, banco, numero_cuenta } = pm.configuration_data
+    if (alias) return alias
+    const ultimos4 = numero_cuenta ? numero_cuenta.slice(-4) : ''
+    return banco ? `Transferencia — ${banco}${ultimos4 ? ` ****${ultimos4}` : ''}` : gatewayLabels.bank!
+  }
+  return gatewayLabels[pm.gateway_type] ?? pm.gateway_type
+}
+
 async function cargarMetodosPago() {
   loadingPaymentMethods.value = true
   try {
@@ -462,7 +475,7 @@ function volver() {
             :disabled="pagoLoading"
             @click="elegirMetodo(pm)"
           >
-            {{ gatewayLabels[pm.gateway_type] ?? pm.gateway_type }}
+            {{ paymentOptionLabel(pm) }}
           </button>
         </div>
 
