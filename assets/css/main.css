@@ -313,6 +313,16 @@ p { color: var(--gray-600); line-height: 1.5; }
 }
 .state-icon { font-size: 40px; margin-bottom: 12px; }
 
+.consent-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 0;
+}
+.consent-check input[type="checkbox"] { width: auto; margin-top: 3px; flex-shrink: 0; }
+.consent-check label { font-size: 13px; color: var(--gray-600); font-weight: 400; }
+.consent-check a { text-decoration: underline; }
+
 .alert-error {
   background: var(--red-50);
   color: var(--red-600);

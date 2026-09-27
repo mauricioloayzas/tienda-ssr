@@ -124,6 +124,7 @@ const telefonoContacto = ref('')
 const email = ref('')
 const tipoIdentificacion = ref('05')
 const identificacion = ref('')
+const aceptaTerminos = ref(false)
 
 // --- Pedido ---
 const orderId = ref('')
@@ -137,6 +138,10 @@ async function crearOrderFinal() {
   }
   if (!nombreContacto.value || !email.value || !identificacion.value) {
     submitError.value = 'Completa tu nombre, email e identificación.'
+    return
+  }
+  if (!aceptaTerminos.value) {
+    submitError.value = 'Debes aceptar los Términos y la Política de Privacidad para continuar.'
     return
   }
 
@@ -443,6 +448,14 @@ function volver() {
           <span class="label">Total</span>
           <span class="value">${{ totalCarrito.toFixed(2) }}</span>
         </div>
+      </div>
+
+      <div class="consent-check">
+        <input id="acepta-terminos" v-model="aceptaTerminos" type="checkbox">
+        <label for="acepta-terminos">
+          Acepto los <a href="https://www.mauloasan.com/terms" target="_blank" rel="noopener">Términos y Condiciones</a>
+          y la <a href="https://www.mauloasan.com/privacy" target="_blank" rel="noopener">Política de Privacidad</a>.
+        </label>
       </div>
 
       <button class="btn btn-primary" style="margin-top:14px;" type="button" :disabled="submitting" @click="crearOrderFinal">
