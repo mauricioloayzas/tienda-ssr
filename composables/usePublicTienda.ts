@@ -1,4 +1,7 @@
 import type {
+  ClienteAuthVerifyResponse,
+  ClienteCheckResponse,
+  ClienteResolveResponse,
   CrearOrderPayload,
   OrderCreada,
   PreparePaymentPublicPayload,
@@ -23,6 +26,18 @@ export function usePublicTienda() {
 
     crearOrder: (profileId: string, payload: CrearOrderPayload) =>
       apotheca.post<OrderCreada>(`/public/profiles/${profileId}/orders`, payload),
+
+    checkCliente: (profileId: string, identificacion: string) =>
+      apotheca.get<ClienteCheckResponse>(`/public/profiles/${profileId}/clientes/check`, { identificacion }),
+
+    resolverCliente: (profileId: string, identificacion: string, verificationId: string) =>
+      apotheca.get<ClienteResolveResponse>(`/public/profiles/${profileId}/clientes/resolve`, { identificacion, verification_id: verificationId }),
+
+    solicitarCodigoCliente: (email: string, recaptchaToken?: string) =>
+      auth.post<{ message: string }>('/public/cliente-auth/request-code', { email, recaptchaToken }),
+
+    verificarCodigoCliente: (email: string, code: string) =>
+      auth.post<ClienteAuthVerifyResponse>('/public/cliente-auth/verify-code', { email, code }),
 
     vincularTransaccion: (orderId: string, transactionId: string) =>
       apotheca.patch<OrderCreada>(`/public/orders/${orderId}/transaction`, { transaction_id: transactionId }),

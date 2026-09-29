@@ -126,18 +126,123 @@ const tipoIdentificacion = ref('05')
 const identificacion = ref('')
 const aceptaTerminos = ref(false)
 
+// --- Identidad: cédula primero, autocompleta si ya está registrada (ver booking-ssr, mismo patrón) ---
+const identidadResuelta = ref(false)
+const identidadVerificacion = ref<{ requerida: boolean; emailHint: string | null } | null>(null)
+const verificandoIdentidad = ref(false)
+const verificationId = ref('')
+const otpEmail = ref('')
+const otpEnviado = ref(false)
+const otpEnviando = ref(false)
+const otpCode = ref('')
+const otpVerificando = ref(false)
+const otpError = ref('')
+
+async function verificarIdentificacion() {
+  if (verificandoIdentidad.value) return // evita doble clic/doble tap disparando el check dos veces
+  submitError.value = ''
+  if (!identificacion.value) {
+    submitError.value = 'Completa tu número de identificación.'
+    return
+  }
+
+  verificandoIdentidad.value = true
+  try {
+    const check = await tienda.checkCliente(profile.value!.id, identificacion.value)
+    if (check.data?.requiere_verificacion) {
+      identidadVerificacion.value = {
+        requerida: true,
+        emailHint: check.data.email_hint ?? null,
+      }
+    } else {
+      identidadResuelta.value = true
+    }
+  } catch {
+    // Falla abierto: si la pista de UX no responde, dejamos seguir como cliente nuevo.
+    // El control real (bloqueante) está en el backend al crear el pedido.
+    identidadResuelta.value = true
+  } finally {
+    verificandoIdentidad.value = false
+  }
+}
+
+async function solicitarCodigoOtp() {
+  if (otpEnviando.value) return
+  otpError.value = ''
+  if (!otpEmail.value) {
+    otpError.value = 'Ingresa tu email.'
+    return
+  }
+  otpEnviando.value = true
+  try {
+    const recaptchaToken = await getToken('solicitar_codigo_cliente')
+    await tienda.solicitarCodigoCliente(otpEmail.value, recaptchaToken)
+    otpEnviado.value = true
+  } catch (e: unknown) {
+    otpError.value = (e as { data?: { error?: string } })?.data?.error || 'No pudimos enviar el código. Intenta de nuevo.'
+  } finally {
+    otpEnviando.value = false
+  }
+}
+
+async function verificarCodigoOtp() {
+  if (otpVerificando.value) return
+  otpError.value = ''
+  if (!otpCode.value) {
+    otpError.value = 'Ingresa el código que te enviamos.'
+    return
+  }
+  otpVerificando.value = true
+  try {
+    const res = await tienda.verificarCodigoCliente(otpEmail.value, otpCode.value)
+    verificationId.value = res.data.verification_id
+
+    try {
+      const resolved = await tienda.resolverCliente(profile.value!.id, identificacion.value, verificationId.value)
+      if (resolved.data?.exists) {
+        nombreContacto.value = resolved.data.razon_social ?? nombreContacto.value
+        telefonoContacto.value = resolved.data.telefono ?? telefonoContacto.value
+        email.value = resolved.data.email ?? email.value
+      }
+    } catch {
+      // Best-effort: si falla el autocompletado, igual puede llenar el resto a mano.
+    }
+
+    // Recién acá, todos juntos: mientras se resuelve el autocompletado, el botón "Verificar"
+    // sigue en pantalla mostrando "Verificando…" (otpVerificando solo se apaga en el finally).
+    // Si otpEnviado/identidadVerificacion se limpiaban antes de este punto, por unos segundos
+    // se veía otra pantalla intermedia (pedir email, o la cédula) en vez de seguir cargando.
+    otpEnviado.value = false
+    otpCode.value = ''
+    identidadVerificacion.value = null
+    identidadResuelta.value = true
+  } catch (e: unknown) {
+    otpError.value = (e as { data?: { error?: string } })?.data?.error || 'Código incorrecto o expirado.'
+  } finally {
+    otpVerificando.value = false
+  }
+}
+
+function cancelarVerificacionIdentidad() {
+  identidadVerificacion.value = null
+  otpEnviado.value = false
+  otpCode.value = ''
+  otpError.value = ''
+}
+
 // --- Pedido ---
 const orderId = ref('')
 const orderTotal = ref(0)
 
 async function crearOrderFinal() {
+  if (submitting.value) return
   submitError.value = ''
   if (!lineasCarrito.value.length) {
     submitError.value = 'Tu carrito está vacío.'
     return
   }
-  if (!nombreContacto.value || !email.value || !identificacion.value) {
-    submitError.value = 'Completa tu nombre, email e identificación.'
+  if (!nombreContacto.value || !email.value) {
+    submitError.value = 'Completa tu nombre y email.'
     return
   }
   if (!aceptaTerminos.value) {
@@ -156,12 +261,22 @@ async function crearOrderFinal() {
         telefono: telefonoContacto.value || undefined,
       },
       items: lineasCarrito.value.map(l => ({ producto_id: l.producto.id, cantidad: l.cantidad })),
+      verification_id: verificationId.value || undefined,
     })
     orderId.value = res.data.id
     orderTotal.value = res.data.total
     step.value = 'pago'
     await cargarMetodosPago()
   } catch (e: unknown) {
+    const status = (e as { response?: { status?: number }; statusCode?: number })?.response?.status
+      ?? (e as { statusCode?: number })?.statusCode
+    if (status === 403) {
+      // Puede pasar en una carrera: alguien reclamó la identidad entre el chequeo y el envío.
+      identidadResuelta.value = false
+      identidadVerificacion.value = { requerida: true, emailHint: null }
+      otpEmail.value = email.value
+      verificationId.value = ''
+    }
     submitError.value = (e as { data?: { error?: string } })?.data?.error || 'No pudimos registrar tu pedido. Intenta de nuevo.'
   } finally {
     submitting.value = false
@@ -416,51 +531,92 @@ function volver() {
     <div v-else-if="step === 'contacto'" class="card">
       <div class="step-label">Tus datos</div>
       <div v-if="submitError" class="alert-error">{{ submitError }}</div>
-      <div class="field">
-        <label for="nombre">Nombre completo</label>
-        <input id="nombre" v-model="nombreContacto" type="text">
-      </div>
-      <div class="field">
-        <label for="telefono">Teléfono</label>
-        <input id="telefono" v-model="telefonoContacto" type="tel">
-      </div>
-      <div class="field">
-        <label for="email">Email</label>
-        <input id="email" v-model="email" type="email" required>
-      </div>
-      <div class="field">
-        <label for="tipo-identificacion">Tipo de identificación</label>
-        <select id="tipo-identificacion" v-model="tipoIdentificacion">
-          <option v-for="t in TIPOS_IDENTIFICACION" :key="t.value" :value="t.value">{{ t.label }}</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="identificacion">Número de {{ TIPOS_IDENTIFICACION.find(t => t.value === tipoIdentificacion)?.label.toLowerCase() }}</label>
-        <input id="identificacion" v-model="identificacion" type="text">
-      </div>
 
-      <div class="card" style="background: var(--gray-50); margin-top: 0;">
-        <div v-for="l in lineasCarrito" :key="l.producto.id" class="summary-row">
-          <span class="label">{{ l.producto.name }} × {{ l.cantidad }}</span>
-          <span class="value">${{ (l.producto.sale_price * l.cantidad).toFixed(2) }}</span>
+      <!-- Etapa 1: identificación primero — si ya está registrada, evita re-tipear el resto -->
+      <template v-if="!identidadResuelta && !identidadVerificacion?.requerida">
+        <div class="field">
+          <label for="tipo-identificacion">Tipo de identificación</label>
+          <select id="tipo-identificacion" v-model="tipoIdentificacion">
+            <option v-for="t in TIPOS_IDENTIFICACION" :key="t.value" :value="t.value">{{ t.label }}</option>
+          </select>
         </div>
-        <div class="summary-row" style="font-weight:700;">
-          <span class="label">Total</span>
-          <span class="value">${{ totalCarrito.toFixed(2) }}</span>
+        <div class="field">
+          <label for="identificacion">Número de {{ TIPOS_IDENTIFICACION.find(t => t.value === tipoIdentificacion)?.label.toLowerCase() }}</label>
+          <input id="identificacion" v-model="identificacion" type="text">
         </div>
+        <button class="btn btn-primary" type="button" :disabled="verificandoIdentidad" @click="verificarIdentificacion">
+          {{ verificandoIdentidad ? 'Comprobando…' : 'Continuar' }}
+        </button>
+      </template>
+
+      <!-- Etapa 2: ya está registrada — verificar por código antes de autocompletar -->
+      <div v-else-if="identidadVerificacion?.requerida" class="card" style="background: var(--gray-50); margin-top: 0;">
+        <p>
+          <strong>Esta identificación ya está registrada.</strong>
+          Verifica tu email para continuar<template v-if="identidadVerificacion.emailHint"> ({{ identidadVerificacion.emailHint }})</template>.
+        </p>
+        <div v-if="otpError" class="alert-error">{{ otpError }}</div>
+
+        <template v-if="!otpEnviado">
+          <div class="field">
+            <label for="otp-email">Tu email registrado</label>
+            <input id="otp-email" v-model="otpEmail" type="email">
+          </div>
+          <button class="btn btn-primary" type="button" :disabled="otpEnviando" @click="solicitarCodigoOtp">
+            {{ otpEnviando ? 'Enviando…' : 'Enviar código' }}
+          </button>
+        </template>
+        <template v-else>
+          <div class="field">
+            <label for="otp-code">Código de verificación</label>
+            <input id="otp-code" v-model="otpCode" type="text" inputmode="numeric" maxlength="6">
+          </div>
+          <button class="btn btn-primary" type="button" :disabled="otpVerificando" @click="verificarCodigoOtp">
+            {{ otpVerificando ? 'Verificando…' : 'Verificar' }}
+          </button>
+          <button class="btn btn-outline" style="margin-top:8px;" type="button" @click="otpEnviado = false">Reenviar código</button>
+        </template>
+        <button class="btn btn-outline" style="margin-top:8px;" type="button" @click="cancelarVerificacionIdentidad">Cancelar</button>
       </div>
 
-      <div class="consent-check">
-        <input id="acepta-terminos" v-model="aceptaTerminos" type="checkbox">
-        <label for="acepta-terminos">
-          Acepto los <a href="https://www.mauloasan.com/terms" target="_blank" rel="noopener">Términos y Condiciones</a>
-          y la <a href="https://www.mauloasan.com/privacy" target="_blank" rel="noopener">Política de Privacidad</a>.
-        </label>
-      </div>
+      <!-- Etapa 3: identidad resuelta (nueva, o verificada y autocompletada) — resto del formulario -->
+      <template v-else>
+        <div class="field">
+          <label for="nombre">Nombre completo</label>
+          <input id="nombre" v-model="nombreContacto" type="text">
+        </div>
+        <div class="field">
+          <label for="telefono">Teléfono</label>
+          <input id="telefono" v-model="telefonoContacto" type="tel">
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" v-model="email" type="email" required>
+        </div>
 
-      <button class="btn btn-primary" style="margin-top:14px;" type="button" :disabled="submitting" @click="crearOrderFinal">
-        {{ submitting ? 'Guardando…' : 'Continuar al pago' }}
-      </button>
+        <div class="card" style="background: var(--gray-50); margin-top: 0;">
+          <div v-for="l in lineasCarrito" :key="l.producto.id" class="summary-row">
+            <span class="label">{{ l.producto.name }} × {{ l.cantidad }}</span>
+            <span class="value">${{ (l.producto.sale_price * l.cantidad).toFixed(2) }}</span>
+          </div>
+          <div class="summary-row" style="font-weight:700;">
+            <span class="label">Total</span>
+            <span class="value">${{ totalCarrito.toFixed(2) }}</span>
+          </div>
+        </div>
+
+        <div class="consent-check">
+          <input id="acepta-terminos" v-model="aceptaTerminos" type="checkbox">
+          <label for="acepta-terminos">
+            Acepto los <a href="https://www.mauloasan.com/terms" target="_blank" rel="noopener">Términos y Condiciones</a>
+            y la <a href="https://www.mauloasan.com/privacy" target="_blank" rel="noopener">Política de Privacidad</a>.
+          </label>
+        </div>
+
+        <button class="btn btn-primary" style="margin-top:14px;" type="button" :disabled="submitting" @click="crearOrderFinal">
+          {{ submitting ? 'Guardando…' : 'Continuar al pago' }}
+        </button>
+      </template>
     </div>
 
     <!-- Pago -->

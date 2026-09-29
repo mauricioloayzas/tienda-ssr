@@ -45,6 +45,7 @@ export interface CrearOrderPayload {
     telefono?: string
   }
   items: CarritoLinea[]
+  verification_id?: string
 }
 
 export interface OrderCreada {
@@ -90,4 +91,24 @@ export interface PreparePaymentPublicResponse {
 export interface TransactionPublic {
   id: string
   status: string
+}
+
+export interface ClienteCheckResponse {
+  exists: boolean
+  requiere_verificacion: boolean
+  email_hint?: string | null
+}
+
+export interface ClienteAuthVerifyResponse {
+  verification_id: string
+  cliente_auth_id: string
+  email: string
+  expires_at: string
+}
+
+export interface ClienteResolveResponse {
+  exists: boolean
+  razon_social?: string
+  telefono?: string | null
+  email?: string | null
 }
