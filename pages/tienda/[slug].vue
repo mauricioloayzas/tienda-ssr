@@ -304,8 +304,19 @@ const gatewayLabels: Record<string, string> = {
 
 // Un negocio puede tener más de una cuenta bancaria — todas caían acá con la misma
 // etiqueta genérica ("Transferencia bancaria"), indistinguibles entre sí antes de elegir.
-// Se distinguen mostrando el nombre del banco (+ los últimos 4 dígitos, por si dos
-// cuentas son del mismo banco).
+// El número completo y el tipo de cuenta ya le llegan al SSR sin enmascarar desde
+// getAllPublic.php (no son datos sensibles del cliente, son la cuenta a la que va a
+// depositar) — se muestran directo acá para que elija sin tener que dar el primer paso
+// solo para ver a cuál cuenta corresponde.
+const TIPO_CUENTA_LABELS: Record<string, string> = { ahorros: 'Ahorros', corriente: 'Corriente' }
+
+function paymentOptionSub(pm: PublicPaymentMethod): string | null {
+  if (pm.gateway_type !== 'bank' || !pm.configuration_data) return null
+  const { tipo_cuenta, numero_cuenta } = pm.configuration_data
+  const tipoLabel = tipo_cuenta ? (TIPO_CUENTA_LABELS[tipo_cuenta] ?? tipo_cuenta) : ''
+  return [tipoLabel, numero_cuenta].filter(Boolean).join(' · ') || null
+}
+
 // Si el negocio activó el recargo por Payphone, el cliente paga este monto en vez del total
 // base — se le muestra el total real ANTES de elegir Payphone, nunca lo descubre recién al
 // ver el cobro. Gross-up exacto (no suma simple del %), igual que PayphoneChargeResolver::
@@ -317,9 +328,7 @@ function montoConRecargo(pm: PublicPaymentMethod): number {
 
 function paymentOptionLabel(pm: PublicPaymentMethod): string {
   if (pm.gateway_type === 'bank' && pm.configuration_data) {
-    const { banco, numero_cuenta } = pm.configuration_data
-    const ultimos4 = numero_cuenta ? numero_cuenta.slice(-4) : ''
-    return banco ? `Transferencia — ${banco}${ultimos4 ? ` ****${ultimos4}` : ''}` : gatewayLabels.bank!
+    return pm.configuration_data.banco ? `Transferencia — ${pm.configuration_data.banco}` : gatewayLabels.bank!
   }
   const label = gatewayLabels[pm.gateway_type] ?? pm.gateway_type
   if ((pm.gateway_type === 'payphone' || pm.gateway_type === 'payphone_split') && pm.recargo_habilitado) {
@@ -664,6 +673,7 @@ function volver() {
             @click="elegirMetodo(pm)"
           >
             {{ paymentOptionLabel(pm) }}
+            <span v-if="paymentOptionSub(pm)" class="sub">{{ paymentOptionSub(pm) }}</span>
           </button>
           <p v-if="hayRecargoPayphone()" class="payment-note">
             * Este negocio aplica un recargo al pagar con Payphone para cubrir la comisión de la pasarela.
