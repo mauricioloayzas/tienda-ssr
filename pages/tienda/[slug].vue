@@ -306,11 +306,13 @@ const gatewayLabels: Record<string, string> = {
 // etiqueta genérica ("Transferencia bancaria"), indistinguibles entre sí antes de elegir.
 // Se distinguen mostrando el nombre del banco (+ los últimos 4 dígitos, por si dos
 // cuentas son del mismo banco).
-// Si el negocio activó el recargo por Payphone, el cliente paga este % más — se le muestra
-// el total real ANTES de elegir Payphone, nunca lo descubre recién al ver el cobro.
+// Si el negocio activó el recargo por Payphone, el cliente paga este monto en vez del total
+// base — se le muestra el total real ANTES de elegir Payphone, nunca lo descubre recién al
+// ver el cobro. Gross-up exacto (no suma simple del %), igual que PayphoneChargeResolver::
+// aplicarRecargo en el backend — así el negocio recibe el 100% del total original neto.
 function montoConRecargo(pm: PublicPaymentMethod): number {
   if (!pm.recargo_habilitado || !pm.recargo_porcentaje) return orderTotal.value
-  return orderTotal.value * (1 + pm.recargo_porcentaje / 100)
+  return orderTotal.value / (1 - pm.recargo_porcentaje / 100)
 }
 
 function paymentOptionLabel(pm: PublicPaymentMethod): string {
