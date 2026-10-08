@@ -71,6 +71,10 @@ export interface PublicPaymentMethod {
   id: string
   gateway_type: GatewayType
   configuration_data: BankConfigurationData | null
+  /** Solo en payphone_split: si el negocio activó que el cliente pague la comisión de Payphone. */
+  recargo_habilitado?: boolean
+  /** Porcentaje del recargo cuando recargo_habilitado es true (ej. 5.75) — null si está apagado. */
+  recargo_porcentaje?: number | null
 }
 
 export interface PreparePaymentPublicPayload {
