@@ -321,9 +321,15 @@ function paymentOptionLabel(pm: PublicPaymentMethod): string {
   }
   const label = gatewayLabels[pm.gateway_type] ?? pm.gateway_type
   if ((pm.gateway_type === 'payphone' || pm.gateway_type === 'payphone_split') && pm.recargo_habilitado) {
-    return `${label} — $${montoConRecargo(pm).toFixed(2)}`
+    return `${label} (+${pm.recargo_porcentaje}% recargo) — $${montoConRecargo(pm).toFixed(2)}`
   }
   return label
+}
+
+// true si alguna opción de pago en la lista tiene el recargo de Payphone activo — para
+// mostrar la aclaración general una sola vez, no repetida en cada botón.
+function hayRecargoPayphone(): boolean {
+  return paymentMethods.value.some(pm => (pm.gateway_type === 'payphone' || pm.gateway_type === 'payphone_split') && pm.recargo_habilitado)
 }
 
 async function cargarMetodosPago() {
@@ -657,11 +663,16 @@ function volver() {
           >
             {{ paymentOptionLabel(pm) }}
           </button>
+          <p v-if="hayRecargoPayphone()" class="payment-note">
+            * Este negocio aplica un recargo al pagar con Payphone para cubrir la comisión de la pasarela.
+          </p>
         </div>
 
         <div v-else-if="metodoSeleccionado.gateway_type === 'payphone' || metodoSeleccionado.gateway_type === 'payphone_split'" class="state-container">
           <p>{{ pagoLoading ? 'Redirigiendo a Payphone…' : 'Preparando el pago…' }}</p>
-          <p v-if="metodoSeleccionado.recargo_habilitado">Total a pagar: ${{ montoConRecargo(metodoSeleccionado).toFixed(2) }}</p>
+          <p v-if="metodoSeleccionado.recargo_habilitado">
+            Total a pagar (incluye recargo del {{ metodoSeleccionado.recargo_porcentaje }}%): ${{ montoConRecargo(metodoSeleccionado).toFixed(2) }}
+          </p>
         </div>
 
         <div v-else-if="metodoSeleccionado.gateway_type === 'bank'">
